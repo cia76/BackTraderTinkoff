@@ -1,11 +1,7 @@
 from typing import Union  # Объединение типов
 import collections
-from datetime import datetime, timedelta
 
-from pytz import timezone, utc  # Работаем с временнОй зоной и UTC
 from grpc import ssl_channel_credentials, secure_channel, RpcError, StatusCode  # Защищенный канал
-
-from google.protobuf.timestamp_pb2 import Timestamp  # Дата/время
 from .grpc.common_pb2 import MoneyValue, Quotation
 from .grpc.instruments_pb2 import InstrumentRequest, InstrumentIdType, InstrumentResponse, Instrument
 from .grpc.instruments_pb2_grpc import InstrumentsServiceStub
@@ -54,8 +50,6 @@ class TKStore(with_metaclass(MetaSingleton, object)):
     BrokerCls = None  # Класс брокера будет задан из брокера
     DataCls = None  # Класс данных будет задан из данных
 
-    tz_msk = timezone('Europe/Moscow')  # Биржа работает по московскому времени
-
     @classmethod
     def getdata(cls, *args, **kwargs):
         """Возвращает новый экземпляр класса данных с заданными параметрами"""
@@ -87,7 +81,6 @@ class TKStore(with_metaclass(MetaSingleton, object)):
         self.default_metadata = list(self.providers.values())[0][1]  # Заголовок запроса по умолчанию (первый) для работы со справочниками
         self.symbols = {}  # Информация о тикерах
         self.new_bars = []  # Новые бары по всем подпискам на тикеры из Тинькофф
-        self.delta = timedelta(seconds=0)  # Разница между локальным временем и временем торгового сервера с учетом временнОй зоны
 
     def start(self):
         pass
@@ -198,44 +191,6 @@ class TKStore(with_metaclass(MetaSingleton, object)):
         """
         return quotation.units + quotation.nano / 1_000_000_000
 
-    def timestamp_to_msk_datetime(self, timestamp: Timestamp) -> datetime:
-        """Перевод времени из Google UTC Timestamp в московское
 
-        :param Timestamp timestamp: Время Google UTC Timestamp
-        :return: Московское время
-        """
-        return self.utc_to_msk_datetime(datetime.utcfromtimestamp(timestamp.seconds + timestamp.nanos / 1_000_000_000))
 
-    def msk_datetime_to_timestamp(self, dt: datetime) -> Timestamp:
-        """Перевод московского времени в Google UTC Timestamp
 
-        :param datetime dt: Московское время
-        :return: Время Google UTC Timestamp
-        """
-        dt_msk = self.tz_msk.localize(dt)  # Заданное время ставим в зону МСК
-        return Timestamp(seconds=int(dt_msk.timestamp()), nanos=dt_msk.microsecond * 1_000)
-
-    def utc_to_msk_datetime(self, dt: datetime) -> datetime:
-        """Перевод времени из UTC в московское
-
-        :param datetime dt: Время UTC
-        :return: Московское время
-        """
-        dt_msk = utc.localize(dt).astimezone(self.tz_msk)  # Переводим UTC в МСК
-        return dt_msk.replace(tzinfo=None)  # Убираем временнУю зону
-
-    def msk_datetime_to_utc_timestamp(self, dt):
-        """Перевод московского времени в кол-во секунд, прошедших с 01.01.1970 00:00 UTC
-
-        :param datetime dt: Московское время
-        :return: Кол-во секунд, прошедших с 01.01.1970 00:00 UTC
-        """
-        dt_msk = self.tz_msk.localize(dt)  # Заданное время ставим в зону МСК
-        return int(dt_msk.timestamp())  # Переводим в кол-во секунд, прошедших с 01.01.1970 в UTC
-
-    def set_delta(self, timestamp: Timestamp):
-        """Установка разница между локальным временем и временем торгового сервера с учетом временнОй зоны
-
-        :param Timestamp timestamp: Текущее время на сервере в формате Google UTC Timestamp
-        """
-        self.delta = datetime.utcfromtimestamp(timestamp.seconds) - datetime.utcnow()

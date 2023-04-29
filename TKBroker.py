@@ -15,11 +15,11 @@ from google.protobuf.timestamp_pb2 import Timestamp  # Дата/время
 from BackTraderTinkoff.grpc.common_pb2 import Ping  # Проверка канала со стороны Тинькофф
 from BackTraderTinkoff.grpc.operations_pb2 import PortfolioRequest, PortfolioResponse  # Портфель
 from BackTraderTinkoff.grpc.orders_pb2 import (
-    PostOrderRequest, PostOrderResponse, CancelOrderRequest, CancelOrderResponse,
+    PostOrderRequest, PostOrderResponse, CancelOrderRequest,
     ORDER_DIRECTION_BUY, ORDER_DIRECTION_SELL, ORDER_TYPE_MARKET, ORDER_TYPE_LIMIT,
     TradesStreamRequest, TradesStreamResponse, OrderTrades, OrderTrade)  # Заявка
 from BackTraderTinkoff.grpc.stoporders_pb2 import (
-    PostStopOrderRequest, PostStopOrderResponse, CancelStopOrderRequest, CancelStopOrderResponse,
+    PostStopOrderRequest, PostStopOrderResponse, CancelStopOrderRequest,
     STOP_ORDER_DIRECTION_BUY, STOP_ORDER_DIRECTION_SELL, StopOrderExpirationType, StopOrderType)  # Стоп-заявка
 
 from BackTraderTinkoff import TKStore
@@ -287,11 +287,11 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
         if not order.alive():  # Если заявка уже была завершена
             return  # то выходим, дальше не продолжаем
         if order.exectype in (Order.Market, Order.Limit):  # Для рыночных и лимитных заявок
-            request = CancelOrderRequest(account_id=self.account_id, order_id=order.info['order_id'])
-            response: CancelOrderResponse = self.store.stub_orders.CancelOrder.with_call(request=request, metadata=self.metadata)  # Отмена активной заявки
+            request = CancelOrderRequest(account_id=self.account_id, order_id=order.info['order_id'])  # Отмена активной заявки
+            self.store.stub_orders.CancelOrder.with_call(request=request, metadata=self.metadata)
         else:  # Для стоп заявок
             request = CancelStopOrderRequest(account_id=self.account_id, stop_order_id=order.info['stop_order_id'])  # Отмена активной стоп заявки
-            response: CancelStopOrderResponse = self.store.stub_stop_orders.CancelStopOrder.with_call(request=request, metadata=self.metadata)
+            self.store.stub_stop_orders.CancelStopOrder.with_call(request=request, metadata=self.metadata)
         return order  # В список уведомлений ничего не добавляем. Ждем события on_order
 
     def oco_pc_check(self, order):
