@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-import operations_pb2 as operations__pb2
+from TinkoffPy.grpc import operations_pb2 as operations__pb2
 
 
 class OperationsServiceStub(object):

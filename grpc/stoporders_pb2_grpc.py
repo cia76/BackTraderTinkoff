@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-import stoporders_pb2 as stoporders__pb2
+from TinkoffPy.grpc import stoporders_pb2 as stoporders__pb2
 
 
 class StopOrdersServiceStub(object):

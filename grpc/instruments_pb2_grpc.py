@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-import instruments_pb2 as instruments__pb2
+from TinkoffPy.grpc import instruments_pb2 as instruments__pb2
 
 
 class InstrumentsServiceStub(object):

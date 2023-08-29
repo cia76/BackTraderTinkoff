@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-import marketdata_pb2 as marketdata__pb2
+from TinkoffPy.grpc import marketdata_pb2 as marketdata__pb2
 
 
 class MarketDataServiceStub(object):
