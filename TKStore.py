@@ -106,15 +106,15 @@ class TKStore(with_metaclass(MetaSingleton, object)):
         :param bool reload: Получить информацию с Тинькофф
         :return: Значение из кэша/Тинькоффили None, если тикер не найден
         """
-        request = InstrumentRequest(id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_TICKER, class_code=class_code, id=symbol)  # Поиск тикера по коду площадки/названию
         if reload or (class_code, symbol) not in self.symbols:  # Если нужно получить информацию с Тинькофф или нет информации о тикере в справочнике
             try:  # Пробуем
-                response, call = self.stub_instruments.GetInstrumentBy.with_call(request=request, metadata=self.default_metadata)  # получить информацию о тикере с Тинькофф
+                request = InstrumentRequest(id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_TICKER, class_code=class_code, id=symbol)  # Поиск тикера по коду площадки/названию
+                response, call = self.stub_instruments.GetInstrumentBy.with_call(request=request, metadata=self.default_metadata)  # Получаем информацию о тикере
             except RpcError as ex:  # Если произошла ошибка
                 if ex.args[0].code == StatusCode.NOT_FOUND:  # Тикер не найден
                     print(f'Информация о {class_code}.{symbol} не найдена')
                 return None  # то возвращаем пустое значение
-            self.symbols[(class_code, symbol)] = response  # Заносим информацию о тикере в справочник
+            self.symbols[(class_code, symbol)] = response.instrument  # Заносим информацию о тикере в справочник
         return self.symbols[(class_code, symbol)]  # Возвращаем значение из справочника
 
     def figi_to_symbol_info(self, figi):
@@ -124,15 +124,16 @@ class TKStore(with_metaclass(MetaSingleton, object)):
         :return: Значение из кэша/Тинькофф или None, если тикер не найден
         """
         try:  # Пробуем
-            return next(item for item in self.symbols.values() if item['instrument']['figi'] == figi)  # вернуть значение из справочника
+            return next(item for item in self.symbols.values() if item.figi == figi)  # вернуть значение из справочника
         except StopIteration:  # Если тикер не найден
             pass  # то продолжаем дальше
         try:  # Пробуем
             request = InstrumentRequest(id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI, class_code='', id=figi)  # Поиск тикера по уникальному коду
             response: InstrumentResponse
-            response, call = self.stub_instruments.GetInstrumentBy.with_call(request=request, metadata=self.default_metadata)  # получить информацию о тикере с Тинькофф
-            self.symbols[(response.instrument.class_code, response.instrument.ticker)] = response  # Заносим информацию о тикере в справочник
-            return response
+            response, call = self.stub_instruments.GetInstrumentBy.with_call(request=request, metadata=self.default_metadata)  # Получаем информацию о тикере
+            instrument = response.instrument  # Информация о тикере
+            self.symbols[(instrument.class_code, instrument.ticker)] = instrument  # Заносим информацию о тикере в справочник
+            return instrument
         except RpcError as ex:  # Если произошла ошибка
             if ex.args[0].code == StatusCode.NOT_FOUND:  # Тикер не найден
                 print(f'Информация о тикере с figi={figi} не найдена')
@@ -150,7 +151,7 @@ class TKStore(with_metaclass(MetaSingleton, object)):
             symbol = '.'.join(symbol_parts[1:])  # Код тикера
         else:  # Если тикер задан без площадки
             symbol = dataname  # Код тикера
-            class_code = next(item.instrument.class_code for item in self.symbols if item.instrument.ticker == symbol)  # Получаем код площадки первого совпадающего тикера
+            class_code = next(item.class_code for item in self.symbols if item.ticker == symbol)  # Получаем код площадки первого совпадающего тикера
         return class_code, symbol  # Возвращаем код площадки и код тикера
 
     @staticmethod
