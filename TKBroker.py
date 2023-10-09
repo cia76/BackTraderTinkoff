@@ -11,7 +11,7 @@ from backtrader.utils.py3 import with_metaclass
 
 from grpc import RpcError  # Ошибка канала
 
-from google.protobuf.timestamp_pb2 import Timestamp  # Дата/время
+from google.protobuf.timestamp_pb2 import Timestamp  # Дата и время
 from BackTraderTinkoff.grpc.common_pb2 import Ping  # Проверка канала со стороны Тинькофф
 from BackTraderTinkoff.grpc.operations_pb2 import PortfolioRequest, PortfolioResponse  # Портфель
 from BackTraderTinkoff.grpc.orders_pb2 import (
@@ -145,7 +145,7 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
                 if e.order_trades != OrderTrades():  # Сделки по заявке
                     order = self.get_order(e.order_trades.order_id)  # Заявка BackTrader
                     for trade in e.order_trades.trades:  # Пробегаемся по всем сделкам заявки
-                        dt = self.store.timestamp_to_msk_datetime(trade.date_time)  # Дата/время сделки по времени биржи (МСК)
+                        dt = self.store.timestamp_to_msk_datetime(trade.date_time)  # Дата и время сделки по времени биржи (МСК)
                         pos = self.getposition(order.data)  # Получаем позицию по тикеру или нулевую позицию если тикера в списке позиций нет
                         size = trade.quantity  # Количество штук в сделке
                         price = trade.price  # Цена за 1 инструмент, по которой совершена сделка
@@ -279,7 +279,7 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
         order.submit(self)  # Отправляем заявку на биржу
         self.notifs.append(order.clone())  # Уведомляем брокера об отправке заявки на биржу
         order.accept(self)  # Заявка принята на бирже
-        self.orders[order.ref] = order  # Сохраняем в списке заявок, отправленных на биржу
+        self.orders[order.ref] = order  # Сохраняем заявку в списке заявок, отправленных на биржу
         return order  # Возвращаем заявку
 
     def cancel_order(self, order):
