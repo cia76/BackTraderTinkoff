@@ -110,10 +110,10 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
 
     def is_bar_valid(self, bar: HistoricCandle):
         """Проверка бара на соответствие условиям выборки"""
-        dt_open = self.store.timestamp_to_msk_datetime(bar.time)  # Дата/время открытия бара
+        dt_open = self.store.timestamp_to_msk_datetime(bar.time)  # Дата и время открытия бара
         if self.p.sessionstart != time.min and dt_open.time() < self.p.sessionstart:  # Если задано время начала сессии и открытие бара до этого времени
             return False  # то бар не соответствует условиям выборки
-        dt_close = self.get_bar_close_date_time(dt_open)  # Дата/время закрытия бара
+        dt_close = self.get_bar_close_date_time(dt_open)  # Дата и время закрытия бара
         if self.p.sessionend != time(23, 59, 59, 999990) and dt_close.time() > self.p.sessionend:  # Если задано время окончания сессии и закрытие бара после этого времени
             return False  # то бар не соответствует условиям выборки
         high = self.store.quotation_to_float(bar.high)  # High
@@ -126,13 +126,13 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         return True  # В остальных случаях бар соответствуем условиям выборки
 
     def get_bar_open_date_time(self, bar: HistoricCandle):
-        """Дата/время открытия бара. Переводим из UTC в MSK для интрадея. Оставляем без времени для дневок и выше."""
+        """Дата и время открытия бара. Переводим из UTC в MSK для интрадея. Оставляем без времени для дневок и выше."""
         return self.store.utc_to_msk_date_time(bar.time)\
             if self.p.timeframe in (TimeFrame.Minutes, TimeFrame.Seconds)\
             else bar.time.date()  # Время открытия бара
 
     def get_bar_close_date_time(self, dt_open, period=1):
-        """Дата/время закрытия бара"""
+        """Дата и время закрытия бара"""
         if self.p.timeframe == TimeFrame.Days:  # Дневной временной интервал (по умолчанию)
             return dt_open + timedelta(days=period)  # Время закрытия бара
         elif self.p.timeframe == TimeFrame.Weeks:  # Недельный временной интервал
