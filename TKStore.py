@@ -71,7 +71,7 @@ class TKStore(with_metaclass(MetaSingleton, object)):
 
     def start(self):
         self.provider.on_candle = self.on_candle   # Обработчик новых баров по подписке из Тинькофф
-        Thread(target=self.provider.subscriptions_marketdata_handler, name='SubscriptionsMarketdataThread').start()  # Создаем и запускаем поток обработки подписок сделок по заявке
+        Thread(target=self.provider.subscriptions_marketdata_handler, name='SubscriptionsMarketdataThread').start()  # Создаем и запускаем поток обработки подписок на биржевую информацию
 
     def put_notification(self, msg, *args, **kwargs):
         self.notifs.append((msg, args, kwargs))
@@ -90,10 +90,10 @@ class TKStore(with_metaclass(MetaSingleton, object)):
         """Обработка прихода нового бара"""
         tf = 'M1' if candle.interval == SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE else\
             'M5' if candle.interval == SubscriptionInterval.SUBSCRIPTION_INTERVAL_FIVE_MINUTES else None  # Т.к. для баров и подписок используются разные временнЫе интервалы, то используем временнОй интервал из расписания
-        bar = dict(datetime=self.provider.utc_to_msk_datetime(datetime.fromtimestamp(candle.time)),  # Дату/время переводим из UTC в МСК
+        bar = dict(datetime=self.provider.utc_to_msk_datetime(datetime.utcfromtimestamp(candle.time.seconds)),  # Дату/время переводим из UTC в МСК
                    open=self.provider.quotation_to_float(candle.open),
                    high=self.provider.money_value_to_float(candle.high),
                    low=self.provider.money_value_to_float(candle.low),
                    close=self.provider.money_value_to_float(candle.close),
-                   volume=int(candle['volume']))
+                   volume=int(candle.volume))
         self.new_bars.append(dict(guid=(candle.figi, tf), data=bar))
