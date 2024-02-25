@@ -42,7 +42,7 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
         self.provider_name = self.p.provider_name if self.p.provider_name else list(self.store.providers.keys())[0]  # Название провайдера, или первое название по ключу name
         self.logger = logging.getLogger(f'FNBroker.{self.provider_name}')  # Будем вести лог
         self.provider: TinkoffPy = self.store.providers[self.provider_name][0]  # Провайдер
-        self.account_id = str(self.store.providers[self.provider_name][1])  # Счет
+        self.account_id = self.store.providers[self.provider_name][1]  # Счет
         self.logger.debug(f'Торговый счет {self.account_id}')
         self.notifs = collections.deque()  # Очередь уведомлений брокера о заявках
         self.startingcash = self.cash = self.getcash()  # Стартовые и текущие свободные средства по счету
@@ -167,6 +167,11 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
             order.reject(self)  # то отклоняем заявку
             self.oco_pc_check(order)  # Проверяем связанные и родительскую/дочерние заявки
             return order  # Возвращаем отклоненную заявку
+        min_step = si.min_price_increment.units + si.min_price_increment.nano / 1_000_000_000  # Шаг цены
+        if order.price:  # Если указана цена заявки
+            order.price = order.price // min_step * min_step  # то ставим ее кратной шагу цены
+        if order.pricelimit:  # Если указана лимитная цена
+            order.pricelimit = order.pricelimit // min_step * min_step  # то ставим ее кратной шагу цены
         if order.exectype != Order.Market and not order.price:  # Если цена заявки не указана для всех заявок, кроме рыночной
             price_type = 'Лимитная' if order.exectype == Order.Limit else 'Стоп'  # Для стоп заявок это будет триггерная (стоп) цена
             print(f'Постановка заявки {order.ref} по тикеру {class_code}.{symbol} отклонена. {price_type} цена (price) не указана для заявки типа {order.exectype}')
@@ -212,21 +217,21 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
             order.addinfo(order_id=response.order_id)  # Номер заявки добавляем в заявку
         elif order.exectype == Order.Limit:  # Лимитная заявка
             direction = ORDER_DIRECTION_BUY if order.isbuy() else ORDER_DIRECTION_SELL  # Покупка/продажа
-            price = self.provider.float_to_quotation(order.price)  # Лимитная цена (price)
+            price = self.provider.float_to_quotation(self.provider.price_to_tinkoff_price(class_code, symbol, order.price))  # Лимитная цена
             request = PostOrderRequest(instrument_id=si.figi, quantity=quantity, price=price, direction=direction, account_id=self.account_id, order_type=ORDER_TYPE_LIMIT, order_id=order_id)
             response: PostOrderResponse = self.provider.call_function(self.provider.stub_orders.PostOrder, request)
             order.addinfo(order_id=response.order_id)  # Номер заявки добавляем в заявку
         elif order.exectype == Order.Stop:  # Стоп заявка
             direction = STOP_ORDER_DIRECTION_BUY if order.isbuy() else STOP_ORDER_DIRECTION_SELL  # Покупка/продажа
-            price = self.provider.float_to_quotation(order.price)
+            price = self.provider.float_to_quotation(self.provider.price_to_tinkoff_price(class_code, symbol, order.price))  # Стоп цена
             request = PostStopOrderRequest(instrument_id=si.figi, quantity=quantity, stop_price=price, direction=direction, account_id=self.account_id,
                                            expiration_type=StopOrderExpirationType.STOP_ORDER_EXPIRATION_TYPE_GOOD_TILL_CANCEL, stop_order_type=StopOrderType.STOP_ORDER_TYPE_STOP_LOSS)
             response: PostStopOrderResponse = self.provider.call_function(self.provider.stub_stop_orders.PostStopOrder, request)
             order.addinfo(stop_order_id=response.stop_order_id)  # Уникальный идентификатор стоп-заявки добавляем в заявку
         elif order.exectype == Order.StopLimit:  # Стоп-лимитная заявка
             direction = STOP_ORDER_DIRECTION_BUY if order.isbuy() else STOP_ORDER_DIRECTION_SELL  # Покупка/продажа
-            price = self.provider.float_to_quotation(order.price)
-            pricelimit = self.provider.float_to_quotation(order.pricelimit)
+            price = self.provider.float_to_quotation(self.provider.price_to_tinkoff_price(class_code, symbol, order.price))  # Стоп цена
+            pricelimit = self.provider.float_to_quotation(self.provider.price_to_tinkoff_price(class_code, symbol, order.pricelimit))  # Лимитная цена
             request = PostStopOrderRequest(instrument_id=si.figi, quantity=quantity, stop_price=price, price=pricelimit, direction=direction, account_id=self.account_id,
                                            expiration_type=StopOrderExpirationType.STOP_ORDER_EXPIRATION_TYPE_GOOD_TILL_CANCEL, stop_order_type=StopOrderType.STOP_ORDER_TYPE_STOP_LIMIT)
             response: PostStopOrderResponse = self.provider.call_function(self.provider.stub_stop_orders.PostStopOrder, request)
