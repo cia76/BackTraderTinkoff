@@ -82,14 +82,13 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
 
     def _load(self):
         """Загрузка бара из истории или нового бара"""
-        if not self.p.live_bars:  # Если получаем только историю (self.history_bars)
-            if len(self.history_bars) == 0:  # Если исторических данных нет / Все исторические данные получены
-                self.put_notification(self.DISCONNECTED)  # Отправляем уведомление об окончании получения исторических бар
-                self.logger.debug('Бары из файла/истории отправлены в ТС. Новые бары получать не нужно. Выход')
-                return False  # Больше сюда заходить не будем
-            bar = self.history_bars[0]  # Берем первый бар из выборки, с ним будем работать
-            self.history_bars.remove(bar)  # Убираем его из хранилища новых бар
-        else:  # Если получаем историю и новые бары (self.new_bars)
+        if not self.p.live_bars and len(self.history_bars) == 0:  # Если получаем только историю (self.history_bars) и исторических данных нет / все исторические данные получены
+            self.put_notification(self.DISCONNECTED)  # Отправляем уведомление об окончании получения исторических бар
+            self.logger.debug('Бары из файла/истории отправлены в ТС. Новые бары получать не нужно. Выход')
+            return False  # Больше сюда заходить не будем
+        if len(self.history_bars) > 0:  # Если есть исторические данные
+            bar = self.history_bars.pop(0)  # Берем и удаляем первый бар из хранилища. С ним будем работать
+        else:  # Если получаем историю и новые бары (self.store.new_bars)
             if len(self.store.new_bars) == 0:  # Если в хранилище никаких новых бар нет
                 return None  # то нового бара нет, будем заходить еще
             new_bars = [b for b in self.store.new_bars if b['guid'][0] == self.figi and b['guid'][1] == self.tf]  # Смотрим в хранилище новых бар бары с guid подписки
