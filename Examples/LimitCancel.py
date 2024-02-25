@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import backtrader as bt
 
@@ -70,9 +70,11 @@ class LimitCancel(bt.Strategy):
 if __name__ == '__main__':  # Точка входа при запуске этого скрипта
     symbol = 'TQBR.SBER'  # Тикер в формате: <Код режима торгов>.<Тикер>
     schedule = MOEXStocks()  # Расписание торгов фондового рынка
+    schedule.delta = timedelta(seconds=10)  # Для расписания нужно увеличить время ожидания, т.к. новый бар у Tinkoff не успевает формироваться
     # symbol = 'SPBFUT.SiH4'  # Для фьючерсов: <SPBFUT>.<Код тикера заглавными буквами>-<Месяц экспирации: 3, 6, 9, 12>.<Последние 2 цифры года>
     # symbol = 'SPBFUT.RIH4'
     # schedule = MOEXFutures()  # Расписание торгов срочного рынка
+    # schedule.delta = timedelta(seconds=10)  # Для расписания нужно увеличить время ожидания, т.к. новый бар у Tinkoff не успевает формироваться
     # noinspection PyArgumentList
     cerebro = bt.Cerebro(stdstats=False, quicknotify=True)  # Инициируем "движок" BackTrader. Стандартная статистика сделок и кривой доходности не нужна. События принимаем без задержек
     store = TKStore(providers=[dict(provider_name='tinkoff_trade', account_id=Config.AccountIds[0], token=Config.Token)])  # Хранилище Tinkoff
@@ -86,8 +88,8 @@ if __name__ == '__main__':  # Точка входа при запуске это
     broker = store.getbroker(use_positions=False)  # Брокер Finam
     # noinspection PyArgumentList
     cerebro.setbroker(broker)  # Устанавливаем брокера
-    # data = store.getdata(dataname=symbol, timeframe=bt.TimeFrame.Minutes, compression=1, live_bars=True)  # Исторические и новые минутные бары за все время по подписке
-    data = store.getdata(dataname=symbol, timeframe=bt.TimeFrame.Minutes, compression=1, schedule=schedule, live_bars=True)  # Исторические и новые минутные бары за все время по расписанию
+    data = store.getdata(dataname=symbol, timeframe=bt.TimeFrame.Minutes, compression=1, live_bars=True)  # Исторические и новые минутные бары за все время по подписке
+    # data = store.getdata(dataname=symbol, timeframe=bt.TimeFrame.Minutes, compression=1, schedule=schedule, live_bars=True)  # Исторические и новые минутные бары за все время по расписанию
     # data = store.getdata(dataname=symbol, timeframe=bt.TimeFrame.Minutes, compression=60, schedule=schedule, live_bars=True)  # Исторические и новые часовые бары за все время по расписанию
     # data = store.getdata(dataname=symbol, schedule=schedule, live_bars=True)  # Исторические и новые дневные бары за все время по расписанию
     cerebro.adddata(data)  # Добавляем данные
