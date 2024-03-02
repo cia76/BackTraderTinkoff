@@ -1,4 +1,4 @@
-import collections
+from collections import deque
 from datetime import datetime
 from threading import Thread
 import logging
@@ -25,23 +25,8 @@ class MetaSingleton(MetaParams):
 
 
 class TKStore(with_metaclass(MetaSingleton, object)):
-    """Хранилище Тинькофф. Работает с мультисчетами
-
-    В параметр providers передавать список счетов в виде словаря с ключами:
-    - provider_name - Название провайдера. Должно быть уникальным
-    - account_id - Торговый счет
-    - token - Торговый токен доступа из Config
-
-    Пример использования:
-    provider1 = dict(provider_name='tinkoff_trade', account_id=Config.AccountIds[0], token=Config.Token)  # Торговый счет Tinkoff
-    provider2 = dict(provider_name='tinkoff_iia', account_id=Config.AccountIds[1], token=Config.Token)  # ИИС Tinkoff
-    store = TKStore(providers=[provider1, provider2])  # Мультисчет
-    """
-    params = (
-        ('providers', None),  # Список провайдеров счетов в виде словаря
-    )
+    """Хранилище Тинькофф"""
     logger = logging.getLogger('TKStore')  # Будем вести лог
-    server = 'invest-public-api.tinkoff.ru'  # Торговый сервер
 
     BrokerCls = None  # Класс брокера будет задан из брокера
     DataCls = None  # Класс данных будет задан из данных
@@ -56,17 +41,10 @@ class TKStore(with_metaclass(MetaSingleton, object)):
         """Возвращает новый экземпляр класса брокера с заданными параметрами"""
         return cls.BrokerCls(*args, **kwargs)
 
-    def __init__(self, **kwargs):
+    def __init__(self, provider=TinkoffPy()):
         super(TKStore, self).__init__()
-        if 'providers' in kwargs:  # Если хранилище создаем из данных/брокера (не рекомендуется)
-            self.p.providers = kwargs['providers']  # то список провайдеров берем из переданного ключа providers
-        self.notifs = collections.deque()  # Уведомления хранилища
-        self.providers = {}  # Справочник провайдеров
-        for provider in self.p.providers:  # Пробегаемся по всем провайдерам
-            provider_name = provider['provider_name'] if 'provider_name' in provider else 'default'  # Название провайдера или название по умолчанию
-            self.providers[provider_name] = (TinkoffPy(provider['token']), provider['account_id'])  # Работа с Tinkoff Invest API из Python https://tinkoff.github.io/investAPI/ с токеном по счету
-            self.logger.debug(f'Добавлен провайдер Тинькофф {provider["account_id"]}')
-        self.provider = list(self.providers.values())[0][0]  # Провайдер по умолчанию для работы со справочниками/историей. Первый счет по ключу provider_name
+        self.notifs = deque()  # Уведомления хранилища
+        self.provider = provider  # Подключаемся ко всем торговым счетам
         self.new_bars = []  # Новые бары по всем подпискам на тикеры из Тинькофф
 
     def start(self):
@@ -83,8 +61,7 @@ class TKStore(with_metaclass(MetaSingleton, object)):
 
     def stop(self):
         self.provider.on_candle = self.provider.default_handler  # Возвращаем обработчик по умолчанию
-        for provider in self.providers.values():  # Пробегаемся по всем значениям провайдеров
-            provider[0].close_channel()  # Закрываем канал перед выходом
+        self.provider.close_channel()  # Закрываем канал перед выходом
 
     def on_candle(self, candle: Candle):
         """Обработка прихода нового бара"""
