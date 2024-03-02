@@ -4,11 +4,7 @@ from datetime import datetime, timedelta
 import backtrader as bt
 
 from BackTraderTinkoff import TKStore  # Хранилище Tinkoff
-from TinkoffPy.Config import Config  # Файл конфигурации
 from MarketPy.Schedule import MOEXStocks, MOEXFutures  # Расписания торгов фондового/срочного рынков
-
-
-logger = logging.getLogger('BackTraderTinkoff.LimitCancel')  # Будем вести лог
 
 
 # noinspection PyShadowingNames,PyProtectedMember
@@ -18,8 +14,9 @@ class LimitCancel(bt.Strategy):
     Если за 1 бар заявка не срабатывает, то закрываем ее
     Если срабатывает, то закрываем позицию. Неважно, с прибылью или убытком
     """
+    logger = logging.getLogger('BackTraderTinkoff.LimitCancel')  # Будем вести лог
     params = (  # Параметры торговой системы
-        ('LimitPct', 1),  # Заявка на покупку на n% ниже цены закрытия
+        ('limit_pct', 1),  # Заявка на покупку на n% ниже цены закрытия
     )
 
     def __init__(self):
@@ -29,17 +26,17 @@ class LimitCancel(bt.Strategy):
 
     def next(self):
         """Получение следующего исторического/нового бара"""
-        logger.info(f'Получен бар: {self.data._name} - {bt.TimeFrame.Names[self.data.p.timeframe]} {self.data.p.compression} - {bt.num2date(self.data.datetime[0]):%d.%m.%Y %H:%M:%S} - Open = {self.data.open[0]}, High = {self.data.high[0]}, Low = {self.data.low[0]}, Close = {self.data.close[0]}, Volume = {self.data.volume[0]}')
         if not self.live:  # Если не в режиме реальной торговли
             return  # то выходим, дальше не продолжаем
+        self.logger.info(f'Получен бар: {self.data._name} - {bt.TimeFrame.Names[self.data.p.timeframe]} {self.data.p.compression} - {bt.num2date(self.data.datetime[0]):%d.%m.%Y %H:%M:%S} - Open = {self.data.open[0]}, High = {self.data.high[0]}, Low = {self.data.low[0]}, Close = {self.data.close[0]}, Volume = {self.data.volume[0]}')
         if self.order and self.order.status == bt.Order.Submitted:  # Если заявка не исполнена (отправлена брокеру)
             return  # то ждем исполнения, выходим, дальше не продолжаем
         if not self.position:  # Если позиции нет
             if self.order and self.order.status == bt.Order.Accepted:  # Если заявка не исполнена (принята брокером)
                 self.cancel(self.order)  # то снимаем ее
-            limit_price = self.data.close[0] * (1 - self.p.LimitPct / 100)  # На n% ниже цены закрытия
+            limit_price = self.data.close[0] * (1 - self.p.limit_pct / 100)  # На n% ниже цены закрытия
             self.order = self.buy(exectype=bt.Order.Limit, price=limit_price)  # Лимитная заявка на покупку
-            logger.info(f'Заявка {self.order.ref} - {"Покупка" if self.order.isbuy else "Продажа"} {self.order.data._name} {self.order.size} @ {self.order.price} cоздана и отправлена на биржу {self.order.info["exchange"]}')
+            self.logger.info(f'Заявка {self.order.ref} - {"Покупка" if self.order.isbuy else "Продажа"} {self.order.data._name} {self.order.size} @ {self.order.price} cоздана и отправлена на биржу {self.order.info["exchange"]}')
         else:  # Если позиция есть
             self.order = self.close()  # Заявка на закрытие позиции (заявки) по рыночной цене
 
@@ -47,37 +44,38 @@ class LimitCancel(bt.Strategy):
         """Изменение статуса приходящих баров"""
         data_status = data._getstatusname(status)  # Получаем статус (только при live_bars=True)
         self.live = data_status == 'LIVE'  # Режим реальной торговли
-        logger.info(data_status)
+        self.logger.info(data_status)
 
     def notify_order(self, order):
         """Изменение статуса заявки"""
         if order.status in (bt.Order.Created, bt.Order.Submitted, bt.Order.Accepted):  # Если заявка создана, отправлена брокеру, принята брокером (не исполнена)
-            logger.info(f'Заявка {order.ref} со статусом {order.getstatusname()}')
+            self.logger.info(f'Заявка {order.ref} со статусом {order.getstatusname()}')
         elif order.status in (bt.Order.Canceled, bt.Order.Margin, bt.Order.Rejected, bt.Order.Expired):  # Если заявка отменена, нет средств, заявка отклонена брокером, снята по времени (снята)
-            logger.info(f'Заявка {order.ref} отменена со статусом {order.getstatusname()}')
+            self.logger.info(f'Заявка {order.ref} отменена со статусом {order.getstatusname()}')
         elif order.status == bt.Order.Partial:  # Если заявка частично исполнена
-            logger.info(f'Заявка {order.ref} частично исполнена со статусом {order.getstatusname()}')
+            self.logger.info(f'Заявка {order.ref} частично исполнена со статусом {order.getstatusname()}')
         elif order.status == bt.Order.Completed:  # Если заявка полностью исполнена
-            logger.info(f'Заявка на {"покупку" if order.isbuy() else "продажу"} исполнена по цене {order.executed.price}, Стоимость {order.executed.value}, Комиссия {order.executed.comm}')
+            self.logger.info(f'Заявка на {"покупку" if order.isbuy() else "продажу"} исполнена по цене {order.executed.price}, Стоимость {order.executed.value}, Комиссия {order.executed.comm}')
             self.order = None  # Сбрасываем заявку на вход в позицию
 
     def notify_trade(self, trade):
         """Изменение статуса позиции"""
         if trade.isclosed:  # Если позиция закрыта
-            logger.info(f'Позиция закрыта. Прибыль = {trade.pnl:.2f}, С учетом комиссий = {trade.pnlcomm:.2f}')
+            self.logger.info(f'Позиция закрыта. Прибыль = {trade.pnl:.2f}, С учетом комиссий = {trade.pnlcomm:.2f}')
 
 
 if __name__ == '__main__':  # Точка входа при запуске этого скрипта
     symbol = 'TQBR.SBER'  # Тикер в формате: <Код режима торгов>.<Тикер>
-    schedule = MOEXStocks()  # Расписание торгов фондового рынка
-    schedule.delta = timedelta(seconds=10)  # Для расписания нужно увеличить время ожидания, т.к. новый бар у Tinkoff не успевает формироваться
     # symbol = 'SPBFUT.SiH4'  # Для фьючерсов: <SPBFUT>.<Код тикера заглавными буквами>-<Месяц экспирации: 3, 6, 9, 12>.<Последние 2 цифры года>
     # symbol = 'SPBFUT.RIH4'
+    timeframe = bt.TimeFrame.Minutes  # Минутный временной интервал
+    compression = 1  # 1 минута
+    fromdate = datetime.today().date()  # За сегодня
+    live_bars = True  # Исторические и новые бары
+    # schedule = MOEXStocks()  # Расписание торгов фондового рынка
+    # schedule.delta = timedelta(seconds=10)  # Для расписания нужно увеличить время ожидания, т.к. новый бар у Tinkoff не успевает формироваться
     # schedule = MOEXFutures()  # Расписание торгов срочного рынка
     # schedule.delta = timedelta(seconds=10)  # Для расписания нужно увеличить время ожидания, т.к. новый бар у Tinkoff не успевает формироваться
-    # noinspection PyArgumentList
-    cerebro = bt.Cerebro(stdstats=False, quicknotify=True)  # Инициируем "движок" BackTrader. Стандартная статистика сделок и кривой доходности не нужна. События принимаем без задержек
-    store = TKStore(providers=[dict(provider_name='tinkoff_trade', account_id=Config.AccountIds[0], token=Config.Token)])  # Хранилище Tinkoff
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',  # Формат сообщения
                         datefmt='%d.%m.%Y %H:%M:%S',  # Формат даты
@@ -85,15 +83,16 @@ if __name__ == '__main__':  # Точка входа при запуске это
                         handlers=[logging.FileHandler('LimitCancel.log'), logging.StreamHandler()])  # Лог записываем в файл и выводим на консоль
     logging.Formatter.converter = lambda *args: datetime.now(tz=store.provider.tz_msk).timetuple()  # В логе время указываем по МСК
 
-    broker = store.getbroker(use_positions=False)  # Брокер Finam
+    # noinspection PyArgumentList
+    cerebro = bt.Cerebro(stdstats=False, quicknotify=True)  # Инициируем "движок" BackTrader. Стандартная статистика сделок и кривой доходности не нужна. События принимаем без задержек
+    store = TKStore()  # Хранилище Tinkoff
+    broker = store.getbroker()  # Брокер Tinkoff
     # noinspection PyArgumentList
     cerebro.setbroker(broker)  # Устанавливаем брокера
-    data = store.getdata(dataname=symbol, timeframe=bt.TimeFrame.Minutes, compression=1, live_bars=True)  # Исторические и новые минутные бары за все время по подписке
-    # data = store.getdata(dataname=symbol, timeframe=bt.TimeFrame.Minutes, compression=1, schedule=schedule, live_bars=True)  # Исторические и новые минутные бары за все время по расписанию
-    # data = store.getdata(dataname=symbol, timeframe=bt.TimeFrame.Minutes, compression=60, schedule=schedule, live_bars=True)  # Исторические и новые часовые бары за все время по расписанию
-    # data = store.getdata(dataname=symbol, schedule=schedule, live_bars=True)  # Исторические и новые дневные бары за все время по расписанию
+    data = store.getdata(dataname=symbol, timeframe=timeframe, compression=compression, fromdate=fromdate, live_bars=live_bars)  # Исторические и новые минутные бары за сегодня по подписке. 1 и 5 минут. Остальное по расписанию
+    # data = store.getdata(dataname=symbol, timeframe=timeframe, compression=compression, fromdate=fromdate, schedule=schedule, live_bars=live_bars)  # Исторические и новые минутные бары за сегодня по расписанию
     cerebro.adddata(data)  # Добавляем данные
     cerebro.addsizer(bt.sizers.FixedSize, stake=10)  # Кол-во акций в штуках для покупки/продажи
     # cerebro.addsizer(bt.sizers.FixedSize, stake=1)  # Кол-во фьючерсов в штуках для покупки/продажи
-    cerebro.addstrategy(LimitCancel, LimitPct=1)  # Добавляем торговую систему с лимитным входом в n%
+    cerebro.addstrategy(LimitCancel, limit_pct=1)  # Добавляем торговую систему с лимитным входом в n%
     cerebro.run()  # Запуск торговой системы
