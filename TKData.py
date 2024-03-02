@@ -9,7 +9,6 @@ from backtrader.utils.py3 import with_metaclass
 from backtrader import TimeFrame, date2num
 
 from BackTraderTinkoff import TKStore
-
 from TinkoffPy.grpc.marketdata_pb2 import SubscriptionInterval, CandleInterval, MarketDataRequest, SubscribeCandlesRequest, SubscriptionAction, CandleInstrument, GetCandlesRequest
 from google.protobuf.timestamp_pb2 import Timestamp
 from google.protobuf.json_format import MessageToDict
@@ -24,7 +23,7 @@ class MetaTKData(AbstractDataBase.__class__):
 class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
     """Данные Тинькофф"""
     params = (
-        ('provider_name', None),  # Название провайдера. Если не задано, то первое название по ключу name
+        ('account_id', 0),  # Порядковый номер счета
         ('four_price_doji', False),  # False - не пропускать дожи 4-х цен, True - пропускать
         ('schedule', None),  # Расписание работы биржи
         ('live_bars', False),  # False - только история, True - история и новые бары
@@ -39,12 +38,13 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
 
     def __init__(self, **kwargs):
         self.store = TKStore(**kwargs)  # Передаем параметры в хранилище Тинькофф. Может работать самостоятельно, не через хранилище
+        self.intraday = self.p.timeframe == TimeFrame.Minutes  # Внутридневной временной интервал
+        self.class_code, self.symbol = self.store.provider.dataname_to_class_code_symbol(self.p.dataname)  # По тикеру получаем код режима торгов и тикера
+        self.account = self.store.provider.accounts[self.p.account_id]  # Счет тикера
         self.tinkoff_timeframe = self.bt_timeframe_to_tinfoff_timeframe(self.p.timeframe, self.p.compression)  # Конвертируем временной интервал из BackTrader в Тинькофф
         self.subscription_interval = SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE if self.tinkoff_timeframe == CandleInterval.CANDLE_INTERVAL_1_MIN else\
             SubscriptionInterval.SUBSCRIPTION_INTERVAL_FIVE_MINUTES if self.tinkoff_timeframe == CandleInterval.CANDLE_INTERVAL_5_MIN else None  # Интервал подписки 1, 5 минут или нет подписки
         self.tf = self.bt_timeframe_to_tf(self.p.timeframe, self.p.compression)  # Конвертируем временной интервал из BackTrader для имени файла истории и расписания
-        self.intraday = self.p.timeframe == TimeFrame.Minutes  # Внутридневной временной интервал
-        self.class_code, self.symbol = self.store.provider.dataname_to_class_code_symbol(self.p.dataname)  # По тикеру получаем код режима торгов и тикера
         self.file = f'{self.class_code}.{self.symbol}_{self.tf}'  # Имя файла истории
         self.logger = logging.getLogger(f'TKData.{self.file}')  # Будем вести лог
         self.file_name = f'{self.datapath}{self.file}.txt'  # Полное имя файла истории
@@ -82,12 +82,12 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
 
     def _load(self):
         """Загрузка бара из истории или нового бара"""
-        if not self.p.live_bars and len(self.history_bars) == 0:  # Если получаем только историю (self.history_bars) и исторических данных нет / все исторические данные получены
+        if len(self.history_bars) > 0:  # Если есть исторические данные
+            bar = self.history_bars.pop(0)  # Берем и удаляем первый бар из хранилища. С ним будем работать
+        elif not self.p.live_bars:  # Если получаем только историю (self.history_bars) и исторических данных нет / все исторические данные получены
             self.put_notification(self.DISCONNECTED)  # Отправляем уведомление об окончании получения исторических бар
             self.logger.debug('Бары из файла/истории отправлены в ТС. Новые бары получать не нужно. Выход')
             return False  # Больше сюда заходить не будем
-        if len(self.history_bars) > 0:  # Если есть исторические данные
-            bar = self.history_bars.pop(0)  # Берем и удаляем первый бар из хранилища. С ним будем работать
         else:  # Если получаем историю и новые бары (self.store.new_bars)
             if len(self.store.new_bars) == 0:  # Если в хранилище никаких новых бар нет
                 return None  # то нового бара нет, будем заходить еще
@@ -154,20 +154,22 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                     self.history_bars.append(bar)  # то добавляем бар
         if len(self.history_bars) > 0:  # Если были получены бары из файла
             self.logger.debug(f'Получено бар из файла: {len(self.history_bars)} с {self.history_bars[0]["datetime"].strftime(self.dt_format)} по {self.history_bars[-1]["datetime"].strftime(self.dt_format)}')
+        else:  # Бары из файла не получены
+            self.logger.debug('Из файла новых бар не получено')
 
     def get_bars_from_history(self) -> None:
         """Получение бар из истории"""
         file_history_bars_len = len(self.history_bars)  # Кол-во полученных бар из файла для лога
-        _, td = self.store.provider.tinkoff_timeframe_to_timeframe(self.tinkoff_timeframe)  # Максимальный период запроса
-        todate_utc = datetime.utcnow().replace(tzinfo=timezone.utc)  # Будем получать бары до текущей даты и времени UTC
-        if len(self.history_bars) > 0:  # Если были получены бары из файла
-            last_date: datetime = self.history_bars[-1]['datetime']  # Дата и время последнего бара по МСК
+        if self.dt_last_open > datetime.min:  # Если в файле были бары
+            last_date = self.dt_last_open  # Дата и время последнего бара из файла по МСК
             next_bar_open_utc = self.store.provider.msk_to_utc_datetime(last_date + timedelta(minutes=1), True) if self.intraday else \
                 last_date.replace(tzinfo=timezone.utc) + timedelta(days=1)  # Смещаем время на возможный следующий бар по UTC
-        else:  # Если не были получены бары из файла
+        else:  # Если в файле не было баров
             si = self.store.provider.get_symbol_info(self.class_code, self.symbol)  # Информация о тикере
             next_bar_open_utc = datetime.fromtimestamp(si.first_1min_candle_date.seconds, timezone.utc) if self.intraday else \
                 datetime.fromtimestamp(si.first_1day_candle_date.seconds, timezone.utc)  # Первый минутный/дневной бар истории
+        todate_utc = datetime.utcnow().replace(tzinfo=timezone.utc)  # Будем получать бары до текущей даты и времени UTC
+        _, td = self.store.provider.tinkoff_timeframe_to_timeframe(self.tinkoff_timeframe)  # Максимальный период запроса
         while True:  # Будем получать бары пока не получим все
             request = GetCandlesRequest(instrument_id=self.figi, interval=self.tinkoff_timeframe)  # Запрос на получение бар
             from_ = getattr(request, 'from')  # т.к. from - ключевое слово в Python, то получаем атрибут from из атрибута интервала
@@ -175,7 +177,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             from_.seconds = Timestamp(seconds=int(next_bar_open_utc.timestamp())).seconds  # Дата и время начала интервала UTC
             todate_min_utc = min(todate_utc, next_bar_open_utc + td)  # До какой даты можем делать запрос
             to_.seconds = Timestamp(seconds=int(todate_min_utc.timestamp())).seconds  # Дата и время окончания интервала UTC
-            self.logger.debug(f'Запрос с {next_bar_open_utc} по {todate_min_utc}')
+            self.logger.debug(f'Получение бар из истории с {next_bar_open_utc} по {todate_min_utc}')
             response = self.store.provider.call_function(self.store.provider.stub_marketdata.GetCandles, request)  # Получаем ответ на запрос бар
             if not response:  # Если в ответ ничего не получили
                 self.logger.warning('Ошибка запроса бар из истории')
@@ -198,9 +200,9 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                                low=self.store.provider.money_dict_value_to_float(new_bar['low']),
                                close=self.store.provider.money_dict_value_to_float(new_bar['close']),
                                volume=int(new_bar['volume']))
+                    self.save_bar_to_file(bar)  # Сохраняем бар в файл
                     if self.is_bar_valid(bar):  # Если исторический бар соответствует всем условиям выборки
                         self.history_bars.append(bar)  # то добавляем бар
-                        self.save_bar_to_file(bar)  # и сохраняем его в файл
             next_bar_open_utc = todate_min_utc + timedelta(minutes=1) if self.intraday else todate_min_utc + timedelta(days=1)  # Смещаем время на возможный следующий бар UTC
             if next_bar_open_utc > todate_utc:  # Если пройден весь интервал
                 break  # то выходим из цикла получения бар
@@ -341,8 +343,10 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         if dt_open <= self.dt_last_open:  # Если пришел бар из прошлого (дата открытия меньше последней даты открытия)
             self.logger.debug(f'Дата/время открытия бара {dt_open} <= последней даты/времени открытия {self.dt_last_open}')
             return False  # то бар не соответствует условиям выборки
+        else:  # Бар не из прошлого
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
         if self.p.fromdate and dt_open < self.p.fromdate or self.p.todate and dt_open > self.p.todate:  # Если задан диапазон, а бар за его границами
-            self.logger.debug(f'Дата/время открытия бара {dt_open} за границами диапазона {self.p.fromdate} - {self.p.todate}')
+            # self.logger.debug(f'Дата/время открытия бара {dt_open} за границами диапазона {self.p.fromdate} - {self.p.todate}')
             return False  # то бар не соответствует условиям выборки
         if self.p.sessionstart != time.min and dt_open.time() < self.p.sessionstart:  # Если задано время начала сессии и открытие бара до этого времени
             self.logger.debug(f'Дата/время открытия бара {dt_open} до начала торговой сессии {self.p.sessionstart}')
@@ -352,13 +356,12 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             self.logger.debug(f'Дата/время открытия бара {dt_open} после окончания торговой сессии {self.p.sessionend}')
             return False  # то бар не соответствует условиям выборки
         if not self.p.four_price_doji and bar['high'] == bar['low']:  # Если не пропускаем дожи 4-х цен, но такой бар пришел
-            self.logger.debug(f'Бар {dt_open} - дожи 4-х цен')
+            # self.logger.debug(f'Бар {dt_open} - дожи 4-х цен')
             return False  # то бар не соответствует условиям выборки
         time_market_now = self.get_tinkoff_date_time_now()  # Текущее биржевое время
         if dt_close > time_market_now and time_market_now.time() < self.p.sessionend:  # Если время закрытия бара еще не наступило на бирже, и сессия еще не закончилась
             self.logger.debug(f'Дата/время {dt_close} закрытия бара еще не наступило')
             return False  # то бар не соответствует условиям выборки
-        self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
         return True  # В остальных случаях бар соответствуем условиям выборки
 
     def save_bar_to_file(self, bar) -> None:
