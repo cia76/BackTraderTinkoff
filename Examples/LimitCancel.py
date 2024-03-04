@@ -36,7 +36,7 @@ class LimitCancel(bt.Strategy):
                 self.cancel(self.order)  # то снимаем ее
             limit_price = self.data.close[0] * (1 - self.p.limit_pct / 100)  # На n% ниже цены закрытия
             self.order = self.buy(exectype=bt.Order.Limit, price=limit_price)  # Лимитная заявка на покупку
-            self.logger.info(f'Заявка {self.order.ref} - {"Покупка" if self.order.isbuy else "Продажа"} {self.order.data._name} {self.order.size} @ {self.order.price} cоздана и отправлена на биржу {self.order.info["exchange"]}')
+            self.logger.info(f'Заявка {self.order.ref} - {"Покупка" if self.order.isbuy else "Продажа"} {self.order.data._name} {self.order.size} @ {self.order.price} cоздана и отправлена на биржу')
         else:  # Если позиция есть
             self.order = self.close()  # Заявка на закрытие позиции (заявки) по рыночной цене
 
