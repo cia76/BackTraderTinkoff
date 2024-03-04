@@ -197,24 +197,24 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
         response = None  # Результат запроса
         if order.exectype == Order.Market:  # Рыночная заявка
             direction = ORDER_DIRECTION_BUY if order.isbuy() else ORDER_DIRECTION_SELL  # Покупка/продажа
-            request = PostOrderRequest(instrument_id=si.figi, quantity=quantity, direction=direction, account_id=self.account_id, order_type=ORDER_TYPE_MARKET, order_id=order_id)
+            request = PostOrderRequest(instrument_id=si.figi, quantity=quantity, direction=direction, account_id=account, order_type=ORDER_TYPE_MARKET, order_id=order_id)
             response = self.store.provider.call_function(self.store.provider.stub_orders.PostOrder, request)
         elif order.exectype == Order.Limit:  # Лимитная заявка
             direction = ORDER_DIRECTION_BUY if order.isbuy() else ORDER_DIRECTION_SELL  # Покупка/продажа
             price = self.store.provider.float_to_quotation(self.store.provider.price_to_tinkoff_price(class_code, symbol, order.price))  # Лимитная цена
-            request = PostOrderRequest(instrument_id=si.figi, quantity=quantity, price=price, direction=direction, account_id=self.account_id, order_type=ORDER_TYPE_LIMIT, order_id=order_id)
+            request = PostOrderRequest(instrument_id=si.figi, quantity=quantity, price=price, direction=direction, account_id=account, order_type=ORDER_TYPE_LIMIT, order_id=order_id)
             response = self.store.provider.call_function(self.store.provider.stub_orders.PostOrder, request)
         elif order.exectype == Order.Stop:  # Стоп заявка
             direction = STOP_ORDER_DIRECTION_BUY if order.isbuy() else STOP_ORDER_DIRECTION_SELL  # Покупка/продажа
             price = self.store.provider.float_to_quotation(self.store.provider.price_to_tinkoff_price(class_code, symbol, order.price))  # Стоп цена
-            request = PostStopOrderRequest(instrument_id=si.figi, quantity=quantity, stop_price=price, direction=direction, account_id=self.account_id,
+            request = PostStopOrderRequest(instrument_id=si.figi, quantity=quantity, stop_price=price, direction=direction, account_id=account,
                                            expiration_type=StopOrderExpirationType.STOP_ORDER_EXPIRATION_TYPE_GOOD_TILL_CANCEL, stop_order_type=StopOrderType.STOP_ORDER_TYPE_STOP_LOSS)
             response = self.store.provider.call_function(self.store.provider.stub_stop_orders.PostStopOrder, request)
         elif order.exectype == Order.StopLimit:  # Стоп-лимитная заявка
             direction = STOP_ORDER_DIRECTION_BUY if order.isbuy() else STOP_ORDER_DIRECTION_SELL  # Покупка/продажа
             price = self.store.provider.float_to_quotation(self.store.provider.price_to_tinkoff_price(class_code, symbol, order.price))  # Стоп цена
             pricelimit = self.store.provider.float_to_quotation(self.store.provider.price_to_tinkoff_price(class_code, symbol, order.pricelimit))  # Лимитная цена
-            request = PostStopOrderRequest(instrument_id=si.figi, quantity=quantity, stop_price=price, price=pricelimit, direction=direction, account_id=self.account_id,
+            request = PostStopOrderRequest(instrument_id=si.figi, quantity=quantity, stop_price=price, price=pricelimit, direction=direction, account_id=account,
                                            expiration_type=StopOrderExpirationType.STOP_ORDER_EXPIRATION_TYPE_GOOD_TILL_CANCEL, stop_order_type=StopOrderType.STOP_ORDER_TYPE_STOP_LIMIT)
             response = self.store.provider.call_function(self.store.provider.stub_stop_orders.PostStopOrder, request)
         order.submit(self)  # Отправляем заявку на биржу (Order.Submitted)
@@ -234,14 +234,24 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
 
     def cancel_order(self, order):
         """Отмена заявки"""
+        # TODO Ждем от Тинькофф подписку на изменение статуса заявки. Пока нужно снимать заявки руками до окончания торговой сессии
         if not order.alive():  # Если заявка уже была завершена
             return  # то выходим, дальше не продолжаем
+        account = order.info['account']  # Торговый счет
         if order.exectype in (Order.Market, Order.Limit):  # Для рыночной и лимитной заявки
-            request = CancelOrderRequest(account_id=self.account_id, order_id=order.info['order_id'])  # Отмена активной заявки
-            self.store.provider.call_function(self.store.provider.stub_orders.CancelOrder, request)
+            request = CancelOrderRequest(account_id=account, order_id=order.info['order_id'])  # Отмена активной заявки
+            response = self.store.provider.call_function(self.store.provider.stub_orders.CancelOrder, request)
+            if response:  # TODO Ждем от Тинькофф подписку на изменение статуса заявки. Отменять будем не по ответу брокера, а по приходу статуса
+                order.cancel()  # Отменяем существующую заявку
+                self.notifs.append(order.clone())  # Уведомляем брокера об отмене заявки
+                self.oco_pc_check(order)  # Проверяем связанные и родительскую/дочерние заявки (Canceled)
         elif order.exectype in (Order.Stop, Order.StopLimit):  # Для стоп и стоп-лимитной заявки
-            request = CancelStopOrderRequest(account_id=self.account_id, stop_order_id=order.info['stop_order_id'])  # Отмена активной стоп заявки
-            self.store.provider.call_function(self.store.provider.stub_stop_orders.CancelStopOrder, request)
+            request = CancelStopOrderRequest(account_id=account, stop_order_id=order.info['stop_order_id'])  # Отмена активной стоп заявки
+            response = self.store.provider.call_function(self.store.provider.stub_stop_orders.CancelStopOrder, request)
+            if response:  # TODO Ждем от Тинькофф подписку на изменение статуса заявки. Отменять будем не по ответу брокера, а по приходу статуса
+                order.cancel()  # Отменяем существующую заявку
+                self.notifs.append(order.clone())  # Уведомляем брокера об отмене заявки
+                self.oco_pc_check(order)  # Проверяем связанные и родительскую/дочерние заявки (Canceled)
         return order  # В список уведомлений ничего не добавляем. Ждем события on_order
 
     def oco_pc_check(self, order):
