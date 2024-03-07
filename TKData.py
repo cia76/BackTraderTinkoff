@@ -343,25 +343,28 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         if dt_open <= self.dt_last_open:  # Если пришел бар из прошлого (дата открытия меньше последней даты открытия)
             self.logger.debug(f'Дата/время открытия бара {dt_open} <= последней даты/времени открытия {self.dt_last_open}')
             return False  # то бар не соответствует условиям выборки
-        else:  # Бар не из прошлого
-            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
         if self.p.fromdate and dt_open < self.p.fromdate or self.p.todate and dt_open > self.p.todate:  # Если задан диапазон, а бар за его границами
             # self.logger.debug(f'Дата/время открытия бара {dt_open} за границами диапазона {self.p.fromdate} - {self.p.todate}')
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
             return False  # то бар не соответствует условиям выборки
         if self.p.sessionstart != time.min and dt_open.time() < self.p.sessionstart:  # Если задано время начала сессии и открытие бара до этого времени
             self.logger.debug(f'Дата/время открытия бара {dt_open} до начала торговой сессии {self.p.sessionstart}')
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
             return False  # то бар не соответствует условиям выборки
         dt_close = self.get_bar_close_date_time(dt_open)  # Дата и время закрытия бара
         if self.p.sessionend != time(23, 59, 59, 999990) and dt_close.time() > self.p.sessionend:  # Если задано время окончания сессии и закрытие бара после этого времени
             self.logger.debug(f'Дата/время открытия бара {dt_open} после окончания торговой сессии {self.p.sessionend}')
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
             return False  # то бар не соответствует условиям выборки
         if not self.p.four_price_doji and bar['high'] == bar['low']:  # Если не пропускаем дожи 4-х цен, но такой бар пришел
-            # self.logger.debug(f'Бар {dt_open} - дожи 4-х цен')
+            self.logger.debug(f'Бар {dt_open} - дожи 4-х цен')
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
             return False  # то бар не соответствует условиям выборки
-        time_market_now = self.get_tinkoff_date_time_now()  # Текущее биржевое время
+        time_market_now = self.get_alor_date_time_now()  # Текущее биржевое время
         if dt_close > time_market_now and time_market_now.time() < self.p.sessionend:  # Если время закрытия бара еще не наступило на бирже, и сессия еще не закончилась
-            self.logger.debug(f'Дата/время {dt_close} закрытия бара еще не наступило')
+            self.logger.debug(f'Дата/время {dt_close} закрытия бара на {dt_open} еще не наступило')
             return False  # то бар не соответствует условиям выборки
+        self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
         return True  # В остальных случаях бар соответствуем условиям выборки
 
     def save_bar_to_file(self, bar) -> None:
