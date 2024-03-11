@@ -360,7 +360,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             self.logger.debug(f'Бар {dt_open} - дожи 4-х цен')
             self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
             return False  # то бар не соответствует условиям выборки
-        time_market_now = self.get_alor_date_time_now()  # Текущее биржевое время
+        time_market_now = self.get_tinkoff_date_time_now()  # Текущее биржевое время
         if dt_close > time_market_now and time_market_now.time() < self.p.sessionend:  # Если время закрытия бара еще не наступило на бирже, и сессия еще не закончилась
             self.logger.debug(f'Дата/время {dt_close} закрытия бара на {dt_open} еще не наступило')
             return False  # то бар не соответствует условиям выборки
