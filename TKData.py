@@ -48,7 +48,9 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         self.file = f'{self.class_code}.{self.symbol}_{self.tf}'  # Имя файла истории
         self.logger = logging.getLogger(f'TKData.{self.file}')  # Будем вести лог
         self.file_name = f'{self.datapath}{self.file}.txt'  # Полное имя файла истории
-        self.figi = self.store.provider.get_symbol_info(self.class_code, self.symbol).figi  # По коду режима торгов и тикера получаем уникальный код тикера
+        si = self.store.provider.get_symbol_info(self.class_code, self.symbol)  # Спецификация тикера
+        self.figi = si.figi  # Уникальный код тикера
+        self.lot = si.lot  # Размер лота
         self.history_bars = []  # Исторические бары после применения фильтров
         self.exit_event = Event()  # Определяем событие выхода из потока
         self.dt_last_open = datetime.min  # Дата и время открытия последнего полученного бара
@@ -101,6 +103,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             new_bar = new_bars[0]  # Берем первый бар из хранилища
             self.store.new_bars.remove(new_bar)  # Убираем его из хранилища
             bar = new_bar['data']  # С данными этого бара будем работать
+            bar['volume'] = int(bar['volume']) * self.lot  # Volume подается как строка. Его обязательно нужно привести к целому и перевести из лотов в штуки
             if not self.is_bar_valid(bar):  # Если бар не соответствует всем условиям выборки
                 return None  # то пропускаем бар, будем заходить еще
             self.logger.debug(f'Сохранение нового бара с {bar["datetime"].strftime(self.dt_format)} в файл')
@@ -117,7 +120,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         self.lines.high[0] = bar['high']  # High
         self.lines.low[0] = bar['low']  # Low
         self.lines.close[0] = bar['close']  # Close
-        self.lines.volume[0] = int(bar['volume'])  # Volume подается как строка. Его обязательно нужно привести к целому
+        self.lines.volume[0] = bar['volume']  # Volume
         self.lines.openinterest[0] = 0  # Открытый интерес в Финам не учитывается
         return True  # Будем заходить сюда еще
 
@@ -199,7 +202,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                                high=self.store.provider.money_dict_value_to_float(new_bar['high']),
                                low=self.store.provider.money_dict_value_to_float(new_bar['low']),
                                close=self.store.provider.money_dict_value_to_float(new_bar['close']),
-                               volume=int(new_bar['volume']))
+                               volume=int(new_bar['volume']) * self.lot)
                     self.save_bar_to_file(bar)  # Сохраняем бар в файл
                     if self.is_bar_valid(bar):  # Если исторический бар соответствует всем условиям выборки
                         self.history_bars.append(bar)  # то добавляем бар
