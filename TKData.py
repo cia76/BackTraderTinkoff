@@ -28,6 +28,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         ('schedule', None),  # Расписание работы биржи
         ('live_bars', False),  # False - только история, True - история и новые бары
     )
+    # datapath = '/home/orangepi/PyAutoTrading/Data/Alor/'  # Путь сохранения файла истории
     datapath = os.path.join('..', '..', 'Data', 'Tinkoff', '')  # Путь сохранения файла истории
     delimiter = '\t'  # Разделитель значений в файле истории. По умолчанию табуляция
     dt_format = '%d.%m.%Y %H:%M'  # Формат представления даты и времени в файле истории. По умолчанию русский формат
