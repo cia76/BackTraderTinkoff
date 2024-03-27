@@ -28,8 +28,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         ('schedule', None),  # Расписание работы биржи
         ('live_bars', False),  # False - только история, True - история и новые бары
     )
-    # datapath = '/home/orangepi/PyAutoTrading/Data/Tinkoff/'  # Путь сохранения файла истории
-    datapath = os.path.join('..', '..', 'Data', 'Tinkoff', '')  # Путь сохранения файла истории
+    datapath = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'Data', 'Tinkoff', '')  # Путь сохранения файла истории
     delimiter = '\t'  # Разделитель значений в файле истории. По умолчанию табуляция
     dt_format = '%d.%m.%Y %H:%M'  # Формат представления даты и времени в файле истории. По умолчанию русский формат
 
@@ -171,7 +170,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         else:  # Если в файле не было баров
             si = self.store.provider.get_symbol_info(self.class_code, self.symbol)  # Информация о тикере
             next_bar_open_utc = datetime.fromtimestamp(si.first_1min_candle_date.seconds, timezone.utc) if self.intraday else \
-                datetime.fromtimestamp(si.first_1day_candle_date.seconds, timezone.utc)  # Первый минутный/дневной бар истории
+                datetime.fromtimestamp(si.first_1day_candle_date.seconds, timezone.utc)  # Дата/время первого минутного/дневного бара истории
         todate_utc = datetime.utcnow().replace(tzinfo=timezone.utc)  # Будем получать бары до текущей даты и времени UTC
         _, td = self.store.provider.tinkoff_timeframe_to_timeframe(self.tinkoff_timeframe)  # Максимальный период запроса
         while True:  # Будем получать бары пока не получим все
@@ -203,7 +202,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                                high=self.store.provider.money_dict_value_to_float(new_bar['high']),
                                low=self.store.provider.money_dict_value_to_float(new_bar['low']),
                                close=self.store.provider.money_dict_value_to_float(new_bar['close']),
-                               volume=int(new_bar['volume']) * self.lot)
+                               volume=int(new_bar['volume']) * self.lot)  # Бар из истории
                     self.save_bar_to_file(bar)  # Сохраняем бар в файл
                     if self.is_bar_valid(bar):  # Если исторический бар соответствует всем условиям выборки
                         self.history_bars.append(bar)  # то добавляем бар
