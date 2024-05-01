@@ -185,7 +185,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             if not response:  # Если в ответ ничего не получили
                 self.logger.warning('Ошибка запроса бар из истории')
                 return  # то выходим, дальше не продолжаем
-            response_dict = MessageToDict(response, including_default_value_fields=True)  # Переводим в словарь из JSON
+            response_dict = MessageToDict(response, always_print_fields_with_no_presence=True)  # Переводим в словарь из JSON
             if 'candles' not in response_dict:  # Если бар нет в словаре
                 self.logger.error(f'Бар (candles) нет в словаре {response_dict}')
                 return  # то выходим, дальше не продолжаем
@@ -237,7 +237,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             if not response:  # Если в ответ ничего не получили
                 self.logger.warning('Ошибка запроса бар из истории по расписанию')
                 continue  # то будем получать следующий бар
-            response_dict = MessageToDict(response, including_default_value_fields=True)  # Получаем бары, переводим в словарь/список
+            response_dict = MessageToDict(response, always_print_fields_with_no_presence=True)  # Получаем бары, переводим в словарь/список
             if 'candles' not in response_dict:  # Если бар нет в словаре
                 self.logger.warning(f'Бар (candles) нет в истории по расписанию {response_dict}')
                 continue  # то будем получать следующий бар
