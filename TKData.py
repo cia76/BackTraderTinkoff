@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta, time
+from time import sleep
 from threading import Thread, Event  # Поток и событие остановки потока получения новых бар по расписанию биржи
 import os.path
 import csv
@@ -31,6 +32,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
     datapath = os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'Data', 'Tinkoff', '')  # Путь сохранения файла истории
     delimiter = '\t'  # Разделитель значений в файле истории. По умолчанию табуляция
     dt_format = '%d.%m.%Y %H:%M'  # Формат представления даты и времени в файле истории. По умолчанию русский формат
+    sleep_time_sec = 1  # Время ожидания в секундах, если не пришел новый бар. Для снижения нагрузки/энергопотребления процессора
 
     def islive(self):
         """Если подаем новые бары, то Cerebro не будет запускать preload и runonce, т.к. новые бары должны идти один за другим"""
@@ -91,11 +93,10 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             self.logger.debug('Бары из файла/истории отправлены в ТС. Новые бары получать не нужно. Выход')
             return False  # Больше сюда заходить не будем
         else:  # Если получаем историю и новые бары (self.store.new_bars)
-            if len(self.store.new_bars) == 0:  # Если в хранилище никаких новых бар нет
-                return None  # то нового бара нет, будем заходить еще
-            new_bars = [b for b in self.store.new_bars if b['guid'][0] == self.figi and b['guid'][1] == self.tf]  # Смотрим в хранилище новых бар бары с guid подписки
+            new_bars = [new_bar for new_bar in self.store.new_bars if new_bar['guid'] == self.guid]  # Смотрим в хранилище новых бар бары с guid подписки
             if len(new_bars) == 0:  # Если новый бар еще не появился
-                self.logger.debug('Новых бар нет')
+                # self.logger.debug(f'Новых бар нет. Ожидание {self.sleep_time_sec} с')  # Для отладки. Грузит процессор
+                sleep(self.sleep_time_sec)  # Ждем для снижения нагрузки/энергопотребления процессора
                 return None  # то нового бара нет, будем заходить еще
             self.last_bar_received = len(new_bars) == 1  # Если в хранилище остался 1 бар, то мы будем получать последний возможный бар
             if self.last_bar_received:  # Получаем последний возможный бар
