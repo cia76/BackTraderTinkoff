@@ -204,9 +204,9 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                                low=self.store.provider.money_dict_value_to_float(new_bar['low']),
                                close=self.store.provider.money_dict_value_to_float(new_bar['close']),
                                volume=int(new_bar['volume']) * self.lot)  # Бар из истории
-                    self.save_bar_to_file(bar)  # Сохраняем бар в файл
                     if self.is_bar_valid(bar):  # Если исторический бар соответствует всем условиям выборки
                         self.history_bars.append(bar)  # то добавляем бар
+                        self.save_bar_to_file(bar)  # и сохраняем бар в файл
             next_bar_open_utc = todate_min_utc + timedelta(minutes=1) if self.intraday else todate_min_utc + timedelta(days=1)  # Смещаем время на возможный следующий бар UTC
             if next_bar_open_utc > todate_utc:  # Если пройден весь интервал
                 break  # то выходим из цикла получения бар
