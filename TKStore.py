@@ -65,12 +65,10 @@ class TKStore(with_metaclass(MetaSingleton, object)):
 
     def on_candle(self, candle: Candle):
         """Обработка прихода нового бара"""
-        tf = 'M1' if candle.interval == SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE else\
-            'M5' if candle.interval == SubscriptionInterval.SUBSCRIPTION_INTERVAL_FIVE_MINUTES else None  # Т.к. для баров и подписок используются разные временнЫе интервалы, то используем временнОй интервал из расписания
         bar = dict(datetime=self.provider.utc_to_msk_datetime(datetime.utcfromtimestamp(candle.time.seconds)),  # Дату/время переводим из UTC в МСК
                    open=self.provider.quotation_to_float(candle.open),
                    high=self.provider.quotation_to_float(candle.high),
                    low=self.provider.quotation_to_float(candle.low),
                    close=self.provider.quotation_to_float(candle.close),
                    volume=int(candle.volume))
-        self.new_bars.append(dict(guid=(candle.figi, tf), data=bar))
+        self.new_bars.append(dict(guid=(candle.figi, candle.interval), data=bar))
