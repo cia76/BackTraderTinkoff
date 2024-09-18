@@ -1,9 +1,10 @@
+import logging  # Будем вести лог
 from datetime import datetime, timezone, timedelta, time
 from time import sleep
+from uuid import uuid4  # Номера расписаний должны быть уникальными во времени и пространстве
 from threading import Thread, Event  # Поток и событие остановки потока получения новых бар по расписанию биржи
 import os.path
 import csv
-import logging
 
 from backtrader.feed import AbstractDataBase
 from backtrader.utils.py3 import with_metaclass
@@ -18,7 +19,7 @@ from google.protobuf.json_format import MessageToDict
 class MetaTKData(AbstractDataBase.__class__):
     def __init__(self, name, bases, dct):
         super(MetaTKData, self).__init__(name, bases, dct)  # Инициализируем класс данных
-        TKStore.DataCls = self  # Регистрируем класс данных в хранилище Alor
+        TKStore.DataCls = self  # Регистрируем класс данных в хранилище Tinkoff
 
 
 class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
@@ -43,9 +44,8 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         self.intraday = self.p.timeframe == TimeFrame.Minutes  # Внутридневной временной интервал
         self.class_code, self.symbol = self.store.provider.dataname_to_class_code_symbol(self.p.dataname)  # По тикеру получаем код режима торгов и тикера
         self.account = self.store.provider.accounts[self.p.account_id]  # Счет тикера
-        self.tinkoff_timeframe = self.bt_timeframe_to_tinfoff_timeframe(self.p.timeframe, self.p.compression)  # Конвертируем временной интервал из BackTrader в Тинькофф
-        self.subscription_interval = SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE if self.tinkoff_timeframe == CandleInterval.CANDLE_INTERVAL_1_MIN else\
-            SubscriptionInterval.SUBSCRIPTION_INTERVAL_FIVE_MINUTES if self.tinkoff_timeframe == CandleInterval.CANDLE_INTERVAL_5_MIN else None  # Интервал подписки 1, 5 минут или нет подписки
+        self.tinkoff_timeframe = self.bt_timeframe_to_tinfoff_timeframe(self.p.timeframe, self.p.compression)  # Конвертируем временной интервал истории бар из BackTrader в Тинькофф
+        self.tinkoff_subscription_timeframe = self.bt_timeframe_to_tinfoff_subscription_timeframe(self.p.timeframe, self.p.compression)  # Конвертируем временной интервал подписки на бары из BackTrader в Тинькофф
         self.tf = self.bt_timeframe_to_tf(self.p.timeframe, self.p.compression)  # Конвертируем временной интервал из BackTrader для имени файла истории и расписания
         self.file = f'{self.class_code}.{self.symbol}_{self.tf}'  # Имя файла истории
         self.logger = logging.getLogger(f'TKData.{self.file}')  # Будем вести лог
@@ -54,6 +54,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         self.figi = si.figi  # Уникальный код тикера
         self.lot = si.lot  # Размер лота
         self.history_bars = []  # Исторические бары после применения фильтров
+        self.guid = None  # Идентификатор подписки/расписания на историю цен
         self.exit_event = Event()  # Определяем событие выхода из потока
         self.dt_last_open = datetime.min  # Дата и время открытия последнего полученного бара
         self.last_bar_received = False  # Получен последний бар
@@ -73,15 +74,15 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             self.put_notification(self.CONNECTED)  # то отправляем уведомление о подключении и начале получения исторических баров
         if self.p.live_bars:  # Если получаем историю и новые бары
             if self.p.schedule:  # Если получаем новые бары по расписанию
+                self.guid = str(uuid4())  # guid расписания
                 Thread(target=self.stream_bars).start()  # Создаем и запускаем получение новых бар по расписанию в потоке
             else:  # Если получаем новые бары по подписке
-                if self.tinkoff_timeframe not in (CandleInterval.CANDLE_INTERVAL_1_MIN, CandleInterval.CANDLE_INTERVAL_5_MIN):  # Подписываться возможно на интервалы 1 и 5 минут
-                    raise NotImplementedError  # Остальные временнЫе интервалы не реализованы в API
+                self.guid = (self.figi, self.tinkoff_subscription_timeframe)  # guid подписки
                 self.logger.debug('Запуск подписки на новые бары')
                 self.store.provider.subscription_marketdata_queue.put(  # Ставим в буфер команд подписки на биржевую информацию
                     MarketDataRequest(subscribe_candles_request=SubscribeCandlesRequest(  # запрос на новые бары
                         subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,  # подписка
-                        instruments=(CandleInstrument(interval=self.subscription_interval, instrument_id=self.figi),),  # на тикер по временному интервалу
+                        instruments=(CandleInstrument(interval=self.tinkoff_subscription_timeframe, instrument_id=self.figi),),  # на тикер по временному интервалу
                         waiting_close=True)))  # по закрытию бара
 
     def _load(self):
@@ -93,7 +94,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             self.logger.debug('Бары из файла/истории отправлены в ТС. Новые бары получать не нужно. Выход')
             return False  # Больше сюда заходить не будем
         else:  # Если получаем историю и новые бары (self.store.new_bars)
-            new_bars = [new_bar for new_bar in self.store.new_bars if new_bar['guid'] == self.guid]  # Смотрим в хранилище новых бар бары с guid подписки
+            new_bars = [new_bar for new_bar in self.store.new_bars if new_bar['guid'] == self.guid]  # Получаем новые бары из хранилища по guid
             if len(new_bars) == 0:  # Если новый бар еще не появился
                 # self.logger.debug(f'Новых бар нет. Ожидание {self.sleep_time_sec} с')  # Для отладки. Грузит процессор
                 sleep(self.sleep_time_sec)  # Ждем для снижения нагрузки/энергопотребления процессора
@@ -135,12 +136,12 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                 self.store.provider.subscription_marketdata_queue.put(  # Ставим в буфер команд подписки на биржевую информацию
                     MarketDataRequest(subscribe_candles_request=SubscribeCandlesRequest(  # запрос на новые бары
                         subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_UNSUBSCRIBE,  # отмена подписки
-                        instruments=(CandleInstrument(interval=self.subscription_interval, instrument_id=self.figi),),  # на тикер по временному интервалу
+                        instruments=(CandleInstrument(interval=self.tinkoff_subscription_timeframe, instrument_id=self.figi),),  # на тикер по временному интервалу
                         waiting_close=True)))  # по закрытию бара
             self.put_notification(self.DISCONNECTED)  # Отправляем уведомление об окончании получения новых бар
         self.store.DataCls = None  # Удаляем класс данных в хранилище
 
-    # Получение бар
+    # Получение/сохранение бар
 
     def get_bars_from_file(self) -> None:
         """Получение бар из файла"""
@@ -199,10 +200,10 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                     if not new_bar['isComplete']:  # Если добрались до незавершенного бара
                         break  # то это последний бар, больше бары обрабатывать не будем
                     bar = dict(datetime=self.get_bar_open_date_time(new_bar),
-                               open=self.store.provider.money_dict_value_to_float(new_bar['open']),
-                               high=self.store.provider.money_dict_value_to_float(new_bar['high']),
-                               low=self.store.provider.money_dict_value_to_float(new_bar['low']),
-                               close=self.store.provider.money_dict_value_to_float(new_bar['close']),
+                               open=self.store.provider.dict_quotation_to_float(new_bar['open']),
+                               high=self.store.provider.dict_quotation_to_float(new_bar['high']),
+                               low=self.store.provider.dict_quotation_to_float(new_bar['low']),
+                               close=self.store.provider.dict_quotation_to_float(new_bar['close']),
                                volume=int(new_bar['volume']) * self.lot)  # Бар из истории
                     if self.is_bar_valid(bar):  # Если исторический бар соответствует всем условиям выборки
                         self.history_bars.append(bar)  # то добавляем бар
@@ -214,6 +215,36 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             self.logger.debug(f'Получено бар из истории: {len(self.history_bars) - file_history_bars_len} с {self.history_bars[file_history_bars_len]["datetime"].strftime(self.dt_format)} по {self.history_bars[-1]["datetime"].strftime(self.dt_format)}')
         else:  # Бары из истории не получены
             self.logger.debug('Из истории новых бар не получено')
+
+    def is_bar_valid(self, bar) -> bool:
+        """Проверка бара на соответствие условиям выборки"""
+        dt_open = bar['datetime']  # Дата и время открытия бара МСК
+        if dt_open <= self.dt_last_open:  # Если пришел бар из прошлого (дата открытия меньше последней даты открытия)
+            self.logger.debug(f'Дата/время открытия бара {dt_open} <= последней даты/времени открытия {self.dt_last_open}')
+            return False  # то бар не соответствует условиям выборки
+        if self.p.fromdate and dt_open < self.p.fromdate or self.p.todate and dt_open > self.p.todate:  # Если задан диапазон, а бар за его границами
+            # self.logger.debug(f'Дата/время открытия бара {dt_open} за границами диапазона {self.p.fromdate} - {self.p.todate}')
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
+            return False  # то бар не соответствует условиям выборки
+        if self.p.sessionstart != time.min and dt_open.time() < self.p.sessionstart:  # Если задано время начала сессии и открытие бара до этого времени
+            self.logger.debug(f'Дата/время открытия бара {dt_open} до начала торговой сессии {self.p.sessionstart}')
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
+            return False  # то бар не соответствует условиям выборки
+        dt_close = self.get_bar_close_date_time(dt_open)  # Дата и время закрытия бара
+        if self.p.sessionend != time(23, 59, 59, 999990) and dt_close.time() > self.p.sessionend:  # Если задано время окончания сессии и закрытие бара после этого времени
+            self.logger.debug(f'Дата/время открытия бара {dt_open} после окончания торговой сессии {self.p.sessionend}')
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
+            return False  # то бар не соответствует условиям выборки
+        if not self.p.four_price_doji and bar['high'] == bar['low']:  # Если не пропускаем дожи 4-х цен, но такой бар пришел
+            self.logger.debug(f'Бар {dt_open} - дожи 4-х цен')
+            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
+            return False  # то бар не соответствует условиям выборки
+        time_market_now = self.get_tinkoff_date_time_now()  # Текущее биржевое время
+        if dt_close > time_market_now and time_market_now.time() < self.p.sessionend:  # Если время закрытия бара еще не наступило на бирже, и сессия еще не закончилась
+            self.logger.debug(f'Дата/время {dt_close} закрытия бара на {dt_open} еще не наступило')
+            return False  # то бар не соответствует условиям выборки
+        self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
+        return True  # В остальных случаях бар соответствуем условиям выборки
 
     def stream_bars(self) -> None:
         """Поток получения новых бар по расписанию биржи"""
@@ -248,31 +279,39 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                 continue  # Будем получать следующий бар
             new_bar = bars[0]  # Получаем первый (завершенный) бар
             bar = dict(datetime=self.get_bar_open_date_time(new_bar),
-                       open=self.store.provider.money_dict_value_to_float(new_bar['open']),
-                       high=self.store.provider.money_dict_value_to_float(new_bar['high']),
-                       low=self.store.provider.money_dict_value_to_float(new_bar['low']),
-                       close=self.store.provider.money_dict_value_to_float(new_bar['close']),
+                       open=self.store.provider.dict_quotation_to_float(new_bar['open']),
+                       high=self.store.provider.dict_quotation_to_float(new_bar['high']),
+                       low=self.store.provider.dict_quotation_to_float(new_bar['low']),
+                       close=self.store.provider.dict_quotation_to_float(new_bar['close']),
                        volume=int(new_bar['volume']))
             self.logger.debug('Получен бар по расписанию')
             self.store.new_bars.append(dict(guid=(self.figi, self.tf), data=bar))  # Добавляем в хранилище новых бар
+
+    def save_bar_to_file(self, bar) -> None:
+        """Сохранение бара в конец файла"""
+        if not os.path.isfile(self.file_name):  # Существует ли файл
+            self.logger.warning(f'Файл {self.file_name} не найден и будет создан')
+            with open(self.file_name, 'w', newline='') as file:  # Создаем файл
+                writer = csv.writer(file, delimiter=self.delimiter)  # Данные в строке разделены табуляцией
+                writer.writerow(bar.keys())  # Записываем заголовок в файл
+        with open(self.file_name, 'a', newline='') as file:  # Открываем файл на добавление в конец. Ставим newline, чтобы в Windows не создавались пустые строки в файле
+            writer = csv.writer(file, delimiter=self.delimiter)  # Данные в строке разделены табуляцией
+            csv_row = bar.copy()  # Копируем бар для того, чтобы изменить формат даты
+            csv_row['datetime'] = csv_row['datetime'].strftime(self.dt_format)  # Приводим дату к формату файла
+            writer.writerow(csv_row.values())  # Записываем бар в конец файла
+            self.logger.debug(f'В файл {self.file_name} записан бар на {csv_row["datetime"]}')
 
     # Функции
 
     @staticmethod
     def bt_timeframe_to_tinfoff_timeframe(timeframe, compression=1):
-        """Перевод временнОго интервала из BackTrader в Тинькофф
+        """Перевод временнОго интервала истории бар из BackTrader в Тинькофф
 
         :param TimeFrame timeframe: Временной интервал
         :param int compression: Размер временнОго интервала
         :return: Временной интервал Тинькофф
         """
-        if timeframe == TimeFrame.Days:  # Дневной временной интервал (по умолчанию)
-            return CandleInterval.CANDLE_INTERVAL_DAY
-        elif timeframe == TimeFrame.Weeks:  # Недельный временной интервал
-            return CandleInterval.CANDLE_INTERVAL_WEEK
-        elif timeframe == TimeFrame.Months:  # Месячный временной интервал
-            return CandleInterval.CANDLE_INTERVAL_MONTH
-        elif timeframe == TimeFrame.Minutes:  # Минутный временной интервал
+        if timeframe == TimeFrame.Minutes:  # Минутный временной интервал
             if compression == 1:  # 1 минута
                 return CandleInterval.CANDLE_INTERVAL_1_MIN
             elif compression == 2:  # 2 минуты
@@ -293,6 +332,50 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
                 return CandleInterval.CANDLE_INTERVAL_2_HOUR
             elif compression == 240:  # 4 часа
                 return CandleInterval.CANDLE_INTERVAL_4_HOUR
+        elif timeframe == TimeFrame.Days:  # Дневной временной интервал (по умолчанию)
+            return CandleInterval.CANDLE_INTERVAL_DAY
+        elif timeframe == TimeFrame.Weeks:  # Недельный временной интервал
+            return CandleInterval.CANDLE_INTERVAL_WEEK
+        elif timeframe == TimeFrame.Months:  # Месячный временной интервал
+            return CandleInterval.CANDLE_INTERVAL_MONTH
+        raise NotImplementedError  # С остальными временнЫми интервалами не работаем
+
+    @staticmethod
+    def bt_timeframe_to_tinfoff_subscription_timeframe(timeframe, compression=1):
+        """Перевод временнОго интервала подписки на бары из BackTrader в Тинькофф
+
+        :param TimeFrame timeframe: Временной интервал
+        :param int compression: Размер временнОго интервала
+        :return: Временной интервал Тинькофф
+        """
+        if timeframe == TimeFrame.Minutes:  # Минутный временной интервал
+            if compression == 1:  # 1 минута
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE
+            elif compression == 2:  # 2 минуты
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_2_MIN
+            elif compression == 3:  # 3 минуты
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_3_MIN
+            elif compression == 5:  # 5 минут
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_FIVE_MINUTES
+            elif compression == 10:  # 10 минут
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_10_MIN
+            elif compression == 15:  # 15 минут
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_FIFTEEN_MINUTES
+            elif compression == 30:  # 30 минут
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_30_MIN
+            elif compression == 60:  # 1 час
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_HOUR
+            elif compression == 120:  # 2 часа
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_2_HOUR
+            elif compression == 240:  # 4 часа
+                return SubscriptionInterval.SUBSCRIPTION_INTERVAL_4_HOUR
+        elif timeframe == TimeFrame.Days:  # Дневной временной интервал (по умолчанию)
+            return SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_DAY
+        elif timeframe == TimeFrame.Weeks:  # Недельный временной интервал
+            return SubscriptionInterval.SUBSCRIPTION_INTERVAL_WEEK
+        elif timeframe == TimeFrame.Months:  # Месячный временной интервал
+            return SubscriptionInterval.SUBSCRIPTION_INTERVAL_MONTH
+        raise NotImplementedError  # С остальными временнЫми интервалами не работаем
 
     @staticmethod
     def bt_timeframe_to_tf(timeframe, compression=1) -> str:
@@ -306,13 +389,11 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             return f'M{compression}'
         # Часовой график f'H{compression}' заменяем минутным. Пример: H1 = M60
         elif timeframe == TimeFrame.Days:  # Дневной временной интервал
-            return f'D1'
+            return 'D1'
         elif timeframe == TimeFrame.Weeks:  # Недельный временной интервал
-            return f'W1'
+            return 'W1'
         elif timeframe == TimeFrame.Months:  # Месячный временной интервал
-            return f'MN1'
-        elif timeframe == TimeFrame.Years:  # Годовой временной интервал
-            return f'Y1'
+            return 'MN1'
         raise NotImplementedError  # С остальными временнЫми интервалами не работаем
 
     def get_bar_open_date_time(self, bar):
@@ -340,50 +421,6 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             return dt_open + timedelta(minutes=self.p.compression * period)  # Время закрытия бара
         elif self.p.timeframe == TimeFrame.Seconds:  # Секундный временной интервал
             return dt_open + timedelta(seconds=self.p.compression * period)  # Время закрытия бара
-
-    def is_bar_valid(self, bar) -> bool:
-        """Проверка бара на соответствие условиям выборки"""
-        dt_open = bar['datetime']  # Дата и время открытия бара МСК
-        if dt_open <= self.dt_last_open:  # Если пришел бар из прошлого (дата открытия меньше последней даты открытия)
-            self.logger.debug(f'Дата/время открытия бара {dt_open} <= последней даты/времени открытия {self.dt_last_open}')
-            return False  # то бар не соответствует условиям выборки
-        if self.p.fromdate and dt_open < self.p.fromdate or self.p.todate and dt_open > self.p.todate:  # Если задан диапазон, а бар за его границами
-            # self.logger.debug(f'Дата/время открытия бара {dt_open} за границами диапазона {self.p.fromdate} - {self.p.todate}')
-            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
-            return False  # то бар не соответствует условиям выборки
-        if self.p.sessionstart != time.min and dt_open.time() < self.p.sessionstart:  # Если задано время начала сессии и открытие бара до этого времени
-            self.logger.debug(f'Дата/время открытия бара {dt_open} до начала торговой сессии {self.p.sessionstart}')
-            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
-            return False  # то бар не соответствует условиям выборки
-        dt_close = self.get_bar_close_date_time(dt_open)  # Дата и время закрытия бара
-        if self.p.sessionend != time(23, 59, 59, 999990) and dt_close.time() > self.p.sessionend:  # Если задано время окончания сессии и закрытие бара после этого времени
-            self.logger.debug(f'Дата/время открытия бара {dt_open} после окончания торговой сессии {self.p.sessionend}')
-            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
-            return False  # то бар не соответствует условиям выборки
-        if not self.p.four_price_doji and bar['high'] == bar['low']:  # Если не пропускаем дожи 4-х цен, но такой бар пришел
-            self.logger.debug(f'Бар {dt_open} - дожи 4-х цен')
-            self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
-            return False  # то бар не соответствует условиям выборки
-        time_market_now = self.get_tinkoff_date_time_now()  # Текущее биржевое время
-        if dt_close > time_market_now and time_market_now.time() < self.p.sessionend:  # Если время закрытия бара еще не наступило на бирже, и сессия еще не закончилась
-            self.logger.debug(f'Дата/время {dt_close} закрытия бара на {dt_open} еще не наступило')
-            return False  # то бар не соответствует условиям выборки
-        self.dt_last_open = dt_open  # Запоминаем дату/время открытия пришедшего бара для будущих сравнений
-        return True  # В остальных случаях бар соответствуем условиям выборки
-
-    def save_bar_to_file(self, bar) -> None:
-        """Сохранение бара в конец файла"""
-        if not os.path.isfile(self.file_name):  # Существует ли файл
-            self.logger.warning(f'Файл {self.file_name} не найден и будет создан')
-            with open(self.file_name, 'w', newline='') as file:  # Создаем файл
-                writer = csv.writer(file, delimiter=self.delimiter)  # Данные в строке разделены табуляцией
-                writer.writerow(bar.keys())  # Записываем заголовок в файл
-        with open(self.file_name, 'a', newline='') as file:  # Открываем файл на добавление в конец. Ставим newline, чтобы в Windows не создавались пустые строки в файле
-            writer = csv.writer(file, delimiter=self.delimiter)  # Данные в строке разделены табуляцией
-            csv_row = bar.copy()  # Копируем бар для того, чтобы изменить формат даты
-            csv_row['datetime'] = csv_row['datetime'].strftime(self.dt_format)  # Приводим дату к формату файла
-            writer.writerow(csv_row.values())  # Записываем бар в конец файла
-            self.logger.debug(f'В файл {self.file_name} записан бар на {csv_row["datetime"]}')
 
     def get_tinkoff_date_time_now(self):
         """Текущая дата и время на сервере Тинькофф с учетом разницы (передается в подписках раз в 4 минуты)"""
