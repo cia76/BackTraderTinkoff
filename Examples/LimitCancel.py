@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import backtrader as bt
 
 from BackTraderTinkoff import TKStore  # Хранилище Tinkoff
-from MarketPy.Schedule import MOEXStocks, MOEXFutures  # Расписания торгов фондового/срочного рынков
+from MarketPy.MOEX import Stocks, Futures  # Расписания торгов фондового/срочного рынков Московской Биржи
 
 
 # noinspection PyShadowingNames,PyProtectedMember
@@ -72,9 +72,9 @@ if __name__ == '__main__':  # Точка входа при запуске это
     compression = 1  # 1 минута
     fromdate = datetime.today().date()  # За сегодня
     live_bars = True  # Исторические и новые бары
-    # schedule = MOEXStocks()  # Расписание торгов фондового рынка
+    # schedule = Stocks()  # Расписание торгов фондового рынка
     # schedule.delta = timedelta(seconds=10)  # Для расписания нужно увеличить время ожидания, т.к. новый бар у Tinkoff не успевает формироваться
-    # schedule = MOEXFutures()  # Расписание торгов срочного рынка
+    # schedule = Futures()  # Расписание торгов срочного рынка
     # schedule.delta = timedelta(seconds=10)  # Для расписания нужно увеличить время ожидания, т.к. новый бар у Tinkoff не успевает формироваться
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',  # Формат сообщения
