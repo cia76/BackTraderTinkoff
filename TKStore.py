@@ -1,5 +1,5 @@
 from collections import deque
-from datetime import datetime
+from datetime import datetime, UTC
 from threading import Thread
 import logging
 
@@ -7,7 +7,7 @@ from backtrader.metabase import MetaParams
 from backtrader.utils.py3 import with_metaclass
 
 from TinkoffPy import TinkoffPy
-from TinkoffPy.grpc.marketdata_pb2 import Candle, SubscriptionInterval
+from TinkoffPy.grpc.marketdata_pb2 import Candle
 
 
 class MetaSingleton(MetaParams):
@@ -65,7 +65,7 @@ class TKStore(with_metaclass(MetaSingleton, object)):
 
     def on_candle(self, candle: Candle):
         """Обработка прихода нового бара"""
-        bar = dict(datetime=self.provider.utc_to_msk_datetime(datetime.utcfromtimestamp(candle.time.seconds)),  # Дату/время переводим из UTC в МСК
+        bar = dict(datetime=self.provider.utc_to_msk_datetime(datetime.fromtimestamp(candle.time.seconds, UTC)),  # Дату/время переводим из UTC в МСК
                    open=self.provider.quotation_to_float(candle.open),
                    high=self.provider.quotation_to_float(candle.high),
                    low=self.provider.quotation_to_float(candle.low),

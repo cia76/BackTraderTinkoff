@@ -1,5 +1,5 @@
 import logging  # Будем вести лог
-from datetime import datetime, timezone, timedelta, time
+from datetime import datetime, timezone, timedelta, time, UTC
 from time import sleep
 from uuid import uuid4  # Номера расписаний должны быть уникальными во времени и пространстве
 from threading import Thread, Event  # Поток и событие остановки потока получения новых бар по расписанию биржи
@@ -173,7 +173,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             si = self.store.provider.get_symbol_info(self.class_code, self.symbol)  # Информация о тикере
             next_bar_open_utc = datetime.fromtimestamp(si.first_1min_candle_date.seconds, timezone.utc) if self.intraday else \
                 datetime.fromtimestamp(si.first_1day_candle_date.seconds, timezone.utc)  # Дата/время первого минутного/дневного бара истории
-        todate_utc = datetime.utcnow().replace(tzinfo=timezone.utc)  # Будем получать бары до текущей даты и времени UTC
+        todate_utc = datetime.now(UTC)  # Будем получать бары до текущей даты и времени UTC
         _, td = self.store.provider.tinkoff_timeframe_to_timeframe(self.tinkoff_timeframe)  # Максимальный период запроса
         while True:  # Будем получать бары пока не получим все
             request = GetCandlesRequest(instrument_id=self.figi, interval=self.tinkoff_timeframe)  # Запрос на получение бар
@@ -250,7 +250,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
         """Поток получения новых бар по расписанию биржи"""
         self.logger.debug('Запуск получения новых бар по расписанию')
         while True:
-            market_datetime_now = self.p.schedule.utc_to_msk_datetime(datetime.utcnow())  # Текущее время на бирже
+            market_datetime_now = self.p.schedule.utc_to_msk_datetime(datetime.now(UTC))  # Текущее время на бирже
             trade_bar_open_datetime = self.p.schedule.trade_bar_open_datetime(market_datetime_now, self.tf)  # Дата и время открытия бара, который будем получать
             trade_bar_request_datetime = self.p.schedule.trade_bar_request_datetime(market_datetime_now, self.tf)  # Дата и время запроса бара на бирже
             sleep_time_secs = (trade_bar_request_datetime - market_datetime_now).total_seconds()  # Время ожидания в секундах
@@ -421,6 +421,7 @@ class TKData(with_metaclass(MetaTKData, AbstractDataBase)):
             return dt_open + timedelta(minutes=self.p.compression * period)  # Время закрытия бара
         elif self.p.timeframe == TimeFrame.Seconds:  # Секундный временной интервал
             return dt_open + timedelta(seconds=self.p.compression * period)  # Время закрытия бара
+        raise NotImplementedError  # С остальными временнЫми интервалами не работаем
 
     def get_tinkoff_date_time_now(self):
         """Текущая дата и время на сервере Тинькофф с учетом разницы (передается в подписках раз в 4 минуты)"""
