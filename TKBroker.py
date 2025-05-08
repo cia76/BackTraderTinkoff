@@ -236,7 +236,7 @@ class TKBroker(with_metaclass(MetaTKBroker, BrokerBase)):
         """Отмена заявки"""
         # TODO Ждем от Тинькофф подписку на изменение статуса заявки. Пока нужно снимать заявки руками до окончания торговой сессии
         if not order.alive():  # Если заявка уже была завершена
-            return  # то выходим, дальше не продолжаем
+            return None  # то выходим, дальше не продолжаем
         account = order.info['account']  # Торговый счет
         if order.exectype in (Order.Market, Order.Limit):  # Для рыночной и лимитной заявки
             request = CancelOrderRequest(account_id=account, order_id=order.info['order_id'])  # Отмена активной заявки
